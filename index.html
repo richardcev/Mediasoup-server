@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mediasoup Test</title>
+</head>
+<body>
+  <h1>Mediasoup WebRTC Test</h1>
+  <video id="localVideo" autoplay playsinline muted></video>
+
+  <script type="module">
+    import { io } from "https://cdn.socket.io/4.3.2/socket.io.esm.min.js";
+    const socket = io();
+    let localStream;
+    let peerConnection;
+    let transport;
+
+    async function startMedia() {
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+        });
+
+        document.getElementById('localVideo').srcObject = localStream;
+
+        socket.emit('createTransport', {}, async (data) => {
+        const transport = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+
+        transport.onicecandidate = ({ candidate }) => {
+            if (candidate) {
+            socket.emit('iceCandidate', { candidate });
+            }
+        };
+
+        // Crear la oferta local
+        const offer = await transport.createOffer();
+        await transport.setLocalDescription(offer);
+
+        // Enviar la oferta al servidor para crear el transporte
+        socket.emit('connectTransport', {
+            dtlsParameters: {
+            role: 'client',
+            sdp: offer.sdp, // Utiliza la SDP de la oferta aquí
+            type: offer.type
+            }
+        });
+
+        // Esperar la respuesta del servidor para establecer la descripción remota
+        socket.on('transportConnected', async (data) => {
+            await transport.setRemoteDescription(new RTCSessionDescription({
+            type: data.type,
+            sdp: data.sdp
+            }));
+
+            localStream.getTracks().forEach(track => {
+            transport.addTrack(track, localStream);
+            });
+
+            socket.emit('produce', {
+            kind: 'video',
+            rtpParameters: {
+                codecs: [{ mimeType: 'video/VP8', payloadType: 96 }],
+                headerExtensions: [],
+                encodings: []
+            }
+            }, (response) => {
+            console.log('Producer ID:', response.id);
+            });
+        });
+        });
+    } catch (error) {
+        console.error('Error en el flujo de medios:', error);
+        }
+    }
+
+
+
+    startMedia().catch(console.error);
+  </script>
+</body>
+</html>
